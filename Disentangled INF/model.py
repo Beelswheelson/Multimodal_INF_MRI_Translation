@@ -1,100 +1,28 @@
-import torch
+import numpy as np
 import torch.nn as nn
 import pytorch_lightning as ptl
-from pytorch_lightning.loggers import WandbLogger
-import numpy as np
+
+from network import *
 
 
-def PE(x, degree):
-    """
-    Positional Encoding
-    :param x: value to encode (typically a 3-dimensional coordinate i.e. (x, y, z))
-    :param degree: number of frequency bands
-    :return: positional encoding of x
-    """
-    y = torch.cat([2.**i * x for i in range(degree)], dim=-1)
-    return torch.cat([x] + [torch.sin(y), torch.cos(y)], dim=-1)
+class MRITranslationINF(ptl.LightningModule):
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        parser = parent_parser.add_argument_group("INF_MRITranslation")
+        parser.add_argument('--num_anatomy_blocks', type=int, default=2, help='number of anatomy blocks')
+        parser.add_argument('--num_modality_blocks', type=int, default=2, help='number of modality blocks')
+        parser.add_argument('--encoding_dim', type=int, default=256, help='encoding dimension')
+        parser.add_argument('--num_spatial_freq', type=int, default=10, help='number of spatial frequencies')
+        parser.add_argument('--latent_dim', type=int, default=256, help='latent dimension')
+        return parent_parser
 
+    def __init__(self, **kwargs):
+        super(MRITranslationINF, self).__init__()
+        self.save_hyperparameters()
+        self.model = DisentangledINF(**self.hparams)
 
-class ResidualINFBlock(nn.Module):
-    def __init__(self, latent_dim=256):
-        super().__init__()
-        self.latent_dim = latent_dim
+        # Training counters
+        self.step, self.cnt_train_step, self.cnt_test_step = self.current_epoch, self.global_step, self.global_step
 
-        self.anatomy_block = [
-            nn.Linear(latent_dim, latent_dim),
-            nn.ReLU(),
-            nn.Linear(latent_dim, latent_dim),
-            nn.ReLU()
-        ]
-
-        self.anatomy_block = nn.Sequential(*self.anatomy_block)
-
-    def forward(self, x):
-        return x + self.anatomy_block(x)
-
-
-class DisentangledINF(nn.Module):
-    def __init__(self, num_anatomy_blocks=2, num_modality_blocks=2, encoding_dim=256, num_spatial_freq=10, latent_dim=256):
-        super().__init__()
-        self.anatomy_blocks = num_anatomy_blocks
-        self.modality_blocks = num_modality_blocks
-        self.W = encoding_dim
-        self.num_spatial_freq = num_spatial_freq
-        self.latent_dim = latent_dim
-        d_xyz = 3 + 6 * num_spatial_freq
-
-        self.xyz_encoding = [
-            nn.Linear(d_xyz, latent_dim),
-            nn.ReLU()
-        ]
-
-        self.anatomy_encoding = [
-            nn.Linear(latent_dim + encoding_dim, latent_dim),
-            nn.ReLU()
-        ]
-
-        self.anatomy_encoder = [
-            ResidualINFBlock(latent_dim),
-            ResidualINFBlock(latent_dim)
-        ]
-
-        # Phi is a scalar value encoding the anatomy at x,y,z - We may ignore it and instead carry the latent
-        # code through into the modality encoder - Evaluate experimentally
-
-        # self.phi = nn.Sequential(nn.Linear(latent_dim, 1), nn.Softplus())
-
-        self.modality_encoder = [
-            ResidualINFBlock(latent_dim)
-        ]
-
-        self.sigma = nn.Sequential(nn.Linear(latent_dim, latent_dim // 2), nn.ReLU(), nn.Linear(latent_dim // 2, 1))
-
-        self.xyz_encoding = nn.Sequential(*self.xyz_encoding)
-        self.anatomy_encoding = nn.Sequential(*self.anatomy_encoding)
-        self.anatomy_encoder = nn.Sequential(*self.anatomy_encoder)
-        self.modality_encoder = nn.Sequential(*self.modality_encoder)
-
-    def forward(self, coordinates, anatomy_latent, modality_latent):
-        """
-        Forward pass of the DisentangledINF model
-        :param coordinates: 3D coordinates of the input
-        :param anatomy_latent: latent code of the anatomy
-        :param modality_latent: latent code of the modality
-        :return: predicted value of the input
-        """
-        xyz = PE(coordinates, self.num_spatial_freq)
-        x_encoded = self.xyz_encoding(xyz)
-        y = self.anatomy_encoder(x_encoded)
-        # phi = self.phi(y)
-        y = torch.cat([y, anatomy_latent], dim=-1)
-        y = self.anatomy_encoding(y)
-        z = self.modality_encoder(y)
-        sigma = self.sigma(z)
-
-        return sigma
-
-
-
-
-
+    def training_step(self, batch, batch_idx):
+        pass
